@@ -5,9 +5,30 @@ import torch
 import torch.nn as nn
 import os
 import model.networks as networks
+import random
+import math
 from .base_model import BaseModel
 logger = logging.getLogger('base')
 
+def get_cycles_buildoff(
+    optimizer, num_warmup_steps: int, num_training_steps: int, noise_amount: float = 0.0, num_cycles: int = 10, merge_cycles: int = 4, last_epoch: int = -1
+):
+    random_state = random.Random(94839)
+
+    def lr_lambda(current_step):
+        if current_step < num_warmup_steps:
+            return float(current_step) / float(max(1, num_warmup_steps))
+        progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
+        if progress >= 1.0:
+            return 0.0
+        cycle_progress = float(num_cycles) * progress
+        start_cycles = num_cycles - merge_cycles
+        if cycle_progress > start_cycles:
+            build_down_cycles = cycle_progress - start_cycles
+            cycle_progress = start_cycles + (build_down_cycles / merge_cycles)
+        return max(0.0, 0.5 * (1.0 + math.cos(math.pi * (cycle_progress % 1.0)))) + (random_state.uniform(-1, 1) * noise_amount)
+
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda, last_epoch)
 
 class DDPM(BaseModel):
     def __init__(self, opt):
@@ -36,8 +57,11 @@ class DDPM(BaseModel):
             else:
                 optim_params = list(self.netG.parameters())
 
-            self.optG = torch.optim.Adam(
+            self.optG = torch.optim.AdamW(
                 optim_params, lr=opt['train']["optimizer"]["lr"])
+            self.schedG = get_cycles_buildoff(
+                self.optG, 1000, opt['train']['n_iter'], 0.01, 100, 5, -1
+            )
             self.log_dict = OrderedDict()
         self.load_network()
         self.print_network()
@@ -53,8 +77,10 @@ class DDPM(BaseModel):
         l_pix = l_pix.sum()/int(b*c*h*w)
         l_pix.backward()
         self.optG.step()
+        self.schedG.step()
 
         # set log
+        self.log_dict['lr'] = self.optG.param_groups[0]['lr']
         self.log_dict['l_pix'] = l_pix.item()
 
     def test(self, continous=False):
@@ -164,3 +190,6 @@ class DDPM(BaseModel):
                 self.optG.load_state_dict(opt['optimizer'])
                 self.begin_step = opt['iter']
                 self.begin_epoch = opt['epoch']
+                self.schedG = get_cycles_buildoff(
+                    self.optG, 1000, self.opt['train']['n_iter'], 0.01, 100, 5, self.begin_epoch - 1
+                )

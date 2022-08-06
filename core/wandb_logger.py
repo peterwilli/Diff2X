@@ -1,4 +1,6 @@
 import os
+import git
+repo = git.Repo(search_parent_directories=True)
 
 class WandbLogger:
     """
@@ -17,6 +19,7 @@ class WandbLogger:
 
         # Initialize a W&B run
         if self._wandb.run is None:
+            opt["git_hash"] = repo.head.object.hexsha
             self._wandb.init(
                 project=opt['wandb']['project'],
                 config=opt,
