@@ -60,7 +60,13 @@ class DDPM(BaseModel):
             self.optG = torch.optim.AdamW(
                 optim_params, lr=opt['train']["optimizer"]["lr"])
             self.schedG = get_cycles_buildoff(
-                self.optG, 1000, opt['train']['n_iter'], 0.01, 100, 5, -1
+                optimizer = self.optG,
+                num_warmup_steps = 1000,
+                num_training_steps = self.opt['train']['n_iter'],
+                noise_amount = 0.01,
+                num_cycles = 100,
+                merge_cycles = 4,
+                last_epoch = -1
             )
             self.log_dict = OrderedDict()
         self.load_network()
@@ -191,5 +197,11 @@ class DDPM(BaseModel):
                 self.begin_step = opt['iter']
                 self.begin_epoch = opt['epoch']
                 self.schedG = get_cycles_buildoff(
-                    self.optG, 1000, self.opt['train']['n_iter'], 0.01, 100, 5, self.begin_epoch - 1
+                    optimizer = self.optG,
+                    num_warmup_steps = 1000,
+                    num_training_steps = self.opt['train']['n_iter'],
+                    noise_amount = 0.01,
+                    num_cycles = 100,
+                    merge_cycles = 4,
+                    last_epoch = self.begin_step - 1
                 )
