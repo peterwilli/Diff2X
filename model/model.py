@@ -26,6 +26,8 @@ def get_cycles_buildoff(
         if cycle_progress > start_cycles:
             build_down_cycles = cycle_progress - start_cycles
             cycle_progress = start_cycles + (build_down_cycles / merge_cycles)
+            # During buildoff there will be no noise
+            noise_amount = 0
         return max(0.0, 0.5 * (1.0 + math.cos(math.pi * (cycle_progress % 1.0)))) + (random_state.uniform(-1, 1) * noise_amount)
 
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda, last_epoch)
