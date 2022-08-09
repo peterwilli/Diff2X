@@ -162,6 +162,7 @@ class GaussianDiffusion(nn.Module):
         if clip_denoised:
             x_recon.clamp_(-1., 1.)
 
+        # TODO: Per tile posterior?
         model_mean, posterior_log_variance = self.q_posterior(
             x_start=x_recon, x_t=x, t=t)
         return model_mean, posterior_log_variance
@@ -170,34 +171,48 @@ class GaussianDiffusion(nn.Module):
     def p_sample(self, x, t, clip_denoised=True, condition_x=None):
         model_mean, model_log_variance = self.p_mean_variance(
             x=x, t=t, clip_denoised=clip_denoised, condition_x=condition_x)
-        noise = torch.randn_like(x) if t > 0 else torch.zeros_like(x)
+        # noise = torch.randn(x.shape[1:]) if t > 0 else torch.zeros(x.shape[1:])
+        noise = torch.randn(x.shape, device=x.device) if t > 0 else torch.zeros(x.shape, device=x.device)
+        # noise = self.batch_noise(noise, x.shape[0]).to(x.device)
         return model_mean + noise * (0.5 * model_log_variance).exp()
 
     @torch.no_grad()
-    def p_sample_loop(self, x_in, continous=False):
+    def batch_noise(self, noise, count):
+        noise_batch = noise.unsqueeze(0)
+        for i in range(count - 1):
+            noise_batch = torch.cat((noise_batch, noise.unsqueeze(0)), dim = 0)
+        return noise_batch
+
+    @torch.no_grad()
+    def p_sample_loop(self, x, continous=False):
         device = self.betas.device
         sample_inter = (1 | (self.num_timesteps//10))
         if not self.conditional:
-            shape = x_in
-            img = torch.randn(shape, device=device)
+            img = torch.randn(x.shape, device=device)
             ret_img = img
             for i in tqdm(reversed(range(0, self.num_timesteps)), desc='sampling loop time step', total=self.num_timesteps):
                 img = self.p_sample(img, i)
                 if i % sample_inter == 0:
-                    ret_img = torch.cat([ret_img, img], dim=0)
+                    if continous:
+                        if i % sample_inter == 0:
+                            ret_img = torch.cat([ret_img, img], dim=0)
+                    else:
+                        ret_img = img
         else:
-            x = x_in
-            shape = x.shape
-            img = torch.randn(shape, device=device)
-            ret_img = x
+            # torch.manual_seed(100)
+            img = torch.randn(x.shape, device=device)
+            # img = self.batch_noise(img, x.shape[0])
+            ret_img = None
             for i in tqdm(reversed(range(0, self.num_timesteps)), desc='conditional sampling loop time step', total=self.num_timesteps):
+                # torch.manual_seed(101 + i)
                 img = self.p_sample(img, i, condition_x=x)
                 if i % sample_inter == 0:
-                    ret_img = torch.cat([ret_img, img], dim=0)
-        if continous:
-            return ret_img
-        else:
-            return ret_img[-1]
+                    if continous:
+                        if i % sample_inter == 0:
+                            ret_img = torch.cat([ret_img, img], dim=0)
+                    else:
+                        ret_img = img
+        return ret_img
 
     @torch.no_grad()
     def sample(self, batch_size=1, continous=False):

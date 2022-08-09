@@ -1,3 +1,6 @@
+# Model files
+*.pth
+
 # Saved images
 partial_image.png
 final_image.png
