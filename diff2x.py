@@ -8,9 +8,9 @@ import torch
 import model as Model
 import core.metrics as Metrics
 import os
-from multiprocessing import Pool
 import traceback
 import sys
+import threading
 
 def main():
     parser = argparse.ArgumentParser()
@@ -25,7 +25,7 @@ def main():
     parser.add_argument('-p', '--phase', type=str, choices=['train', 'val'],
                         help='Run either train(training) or val(generation)', default='train')  
     parser.add_argument('-i', '--image', type=str,
-                        default="misc/diff2x_demo_image.png",
+                        default="misc/test_image_by_peterwilli.png",
                         help='Image file to upscale')
                         
     logger = logging.getLogger('base')
@@ -100,12 +100,19 @@ def diff2x(opt, input_image, logger):
                 row = []
                 for x in range(tcx):
                     tile_input.append((x, y))
-            tile_batch = 20
+            tile_batch = 10
             logging.info(f"Making {len(tile_input)} tiles in {len(tile_input) // tile_batch} batches...")
             for tc in range(0, len(tile_input), tile_batch):
                 logging.info(f"Batch {tc // tile_batch}")
                 tiles_to_process = tile_input[tc:tc + min(tile_batch, len(tile_input))]
-                process_tiles(tiles_to_process, tile_size, img, final_image, diffusion)
+                threads = []
+                for tile in tiles_to_process:
+                    thread = threading.Thread(target=process_tile, args=(tile[0], tile[1], tile_size, img, final_image, diffusion))
+                    threads.append(thread)
+                    thread.start()
+                for index, thread in enumerate(threads):
+                    thread.join()
+
         except KeyboardInterrupt:
             print('KeyboardInterrupt exception is caught')
             final_image.save("partial_image.png")

@@ -5,8 +5,10 @@ import torch.nn.functional as F
 from inspect import isfunction
 from functools import partial
 import numpy as np
+import torchvision
 from tqdm import tqdm
-
+import scipy
+from scipy.signal import convolve2d
 
 def _warmup_beta(linear_start, linear_end, n_timestep, warmup_frac):
     betas = linear_end * np.ones(n_timestep, dtype=np.float64)
@@ -162,7 +164,6 @@ class GaussianDiffusion(nn.Module):
         if clip_denoised:
             x_recon.clamp_(-1., 1.)
 
-        # TODO: Per tile posterior?
         model_mean, posterior_log_variance = self.q_posterior(
             x_start=x_recon, x_t=x, t=t)
         return model_mean, posterior_log_variance
@@ -183,6 +184,24 @@ class GaussianDiffusion(nn.Module):
             noise_batch = torch.cat((noise_batch, noise.unsqueeze(0)), dim = 0)
         return noise_batch
 
+    def estimate_noise(self, img_tensor):
+        greyscaler = torchvision.transforms.Grayscale()
+        img_tensor = greyscaler(img_tensor)
+        W, H = img_tensor.squeeze().shape
+        K = torch.tensor(
+            [
+                [ 1, -2,  1],
+                [-2,  4, -2],
+                [ 1, -2,  1]
+            ], 
+            device = img_tensor.device,
+            dtype = torch.float32
+        ).unsqueeze(0).unsqueeze(0)
+        torch_conv = F.conv2d(img_tensor, K, bias=None, stride=(1, 1), padding=1) 
+        sigma = torch.sum(torch.abs(torch_conv))
+        sigma = sigma * math.sqrt(0.5 * math.pi) / (6 * (W - 2) * (H - 2))
+        return sigma
+
     @torch.no_grad()
     def p_sample_loop(self, x, continous=False):
         device = self.betas.device
@@ -199,19 +218,25 @@ class GaussianDiffusion(nn.Module):
                     else:
                         ret_img = img
         else:
-            # torch.manual_seed(100)
             img = torch.randn(x.shape, device=device)
-            # img = self.batch_noise(img, x.shape[0])
             ret_img = None
-            for i in tqdm(reversed(range(0, self.num_timesteps)), desc='conditional sampling loop time step', total=self.num_timesteps):
-                # torch.manual_seed(101 + i)
-                img = self.p_sample(img, i, condition_x=x)
-                if i % sample_inter == 0:
-                    if continous:
-                        if i % sample_inter == 0:
-                            ret_img = torch.cat([ret_img, img], dim=0)
-                    else:
-                        ret_img = img
+            sigma = 1
+            bump = 0
+            while True:
+                pbar = tqdm(reversed(range(0, self.num_timesteps)), desc=f'conditional sampling loop time step [sigma: {sigma:.4f}]', total=self.num_timesteps)
+                for i in pbar:
+                    img = self.p_sample(img, i, condition_x=x)
+                    sigma = self.estimate_noise(img)
+                    pbar.set_description(f'conditional sampling loop time step [sigma: {sigma:.4f}]')
+                    passed_noise_treshold = sigma < 0.0035
+                    if i % sample_inter == 0 or passed_noise_treshold:
+                        if continous:
+                            if i % sample_inter == 0:
+                                ret_img = torch.cat([ret_img, img], dim=0)
+                        else:
+                            ret_img = img
+                    if passed_noise_treshold:
+                        return ret_img
         return ret_img
 
     @torch.no_grad()
