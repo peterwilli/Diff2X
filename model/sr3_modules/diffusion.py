@@ -203,40 +203,32 @@ class GaussianDiffusion(nn.Module):
         return sigma
 
     @torch.no_grad()
-    def p_sample_loop(self, x, continous=False):
-        device = self.betas.device
-        sample_inter = (1 | (self.num_timesteps//10))
-        if not self.conditional:
-            img = torch.randn(x.shape, device=device)
-            ret_img = img
-            for i in tqdm(reversed(range(0, self.num_timesteps)), desc='sampling loop time step', total=self.num_timesteps):
-                img = self.p_sample(img, i)
-                if i % sample_inter == 0:
-                    if continous:
-                        if i % sample_inter == 0:
-                            ret_img = torch.cat([ret_img, img], dim=0)
-                    else:
-                        ret_img = img
-        else:
-            img = torch.randn(x.shape, device=device)
-            ret_img = None
-            sigma = 1
-            bump = 0
-            while True:
-                pbar = tqdm(reversed(range(0, self.num_timesteps)), desc=f'conditional sampling loop time step [sigma: {sigma:.4f}]', total=self.num_timesteps)
-                for i in pbar:
-                    img = self.p_sample(img, i, condition_x=x)
-                    sigma = self.estimate_noise(img)
-                    pbar.set_description(f'conditional sampling loop time step [sigma: {sigma:.4f}]')
-                    passed_noise_treshold = sigma < 0.0035
-                    if i % sample_inter == 0 or passed_noise_treshold:
-                        if continous:
-                            if i % sample_inter == 0:
-                                ret_img = torch.cat([ret_img, img], dim=0)
-                        else:
-                            ret_img = img
-                    if passed_noise_treshold:
-                        return ret_img
+    def p_sample_loop(self, x, name = "Unamed Tile", continous=False):
+        current_step = self.num_timesteps - 1
+        last_sigma = None
+        noise_treshold = 0.0035
+        noise_tries = 1000
+        pbar = tqdm(range(100), desc=f"[{name.ljust(12)}] Noise Treshold")
+        img = torch.randn(x.shape, device=x.device)
+        start_sigma = self.estimate_noise(img).item()
+        sigma = start_sigma
+        for _ in range(noise_tries):
+            img_new = self.p_sample(img, current_step, condition_x=x)
+            sigma_new = self.estimate_noise(img_new).item()
+            if sigma_new < sigma:
+                sigma = sigma_new
+                img = img_new
+            change_pct = 1 - (abs(sigma - noise_treshold) / start_sigma)
+            pbar.n = math.floor(change_pct * 100)
+            pbar.refresh()
+            if last_sigma is not None:
+                sigma_change_pct = (last_sigma - sigma) / last_sigma
+                if sigma_change_pct < 0.01:
+                    current_step = max(0, current_step - 1)
+            last_sigma = sigma
+            passed_noise_treshold = sigma < noise_treshold
+            if passed_noise_treshold:
+                return img
         return ret_img
 
     @torch.no_grad()
@@ -246,8 +238,8 @@ class GaussianDiffusion(nn.Module):
         return self.p_sample_loop((batch_size, channels, image_size, image_size), continous)
 
     @torch.no_grad()
-    def super_resolution(self, x_in, continous=False):
-        return self.p_sample_loop(x_in, continous)
+    def super_resolution(self, x_in, name, continous=False):
+        return self.p_sample_loop(x_in, name, continous)
 
     def q_sample(self, x_start, continuous_sqrt_alpha_cumprod, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))

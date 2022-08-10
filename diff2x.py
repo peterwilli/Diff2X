@@ -11,6 +11,7 @@ import os
 import traceback
 import sys
 import threading
+from queue import Empty, Queue
 
 def main():
     parser = argparse.ArgumentParser()
@@ -55,28 +56,20 @@ def process_tile(x, y, tile_size, img, final_image, diffusion):
     crop_rect = (x * tile_size, y * tile_size, min(img.size[0], (x + 1) * tile_size), min(img.size[1], (y + 1) * tile_size))
     tile = img.crop(crop_rect).resize((tile_size * 2, tile_size * 2), Image.BICUBIC)
     tensor = tile_to_tensor(tile).to(diffusion.device)
-    tensor_up = diffusion.netG.super_resolution(tensor.unsqueeze(0), False)
+    tensor_up = diffusion.netG.super_resolution(tensor.unsqueeze(0), name = f"Tile {x + 1}x{y + 1}", continous = False)
     upscaled_tile = tensor_to_tile(tensor_up)
     final_image.paste(upscaled_tile, (crop_rect[0] * 2, crop_rect[1] * 2))
-    
-def process_tiles(positions, tile_size, img, final_image, diffusion):
-    result = None
-    for pos in positions:
-        x = pos[0]
-        y = pos[1]
-        crop_rect = (x * tile_size, y * tile_size, min(img.size[0], (x + 1) * tile_size), min(img.size[1], (y + 1) * tile_size))
-        tile = img.crop(crop_rect).resize((tile_size * 2, tile_size * 2), Image.BICUBIC)
-        tensor = tile_to_tensor(tile)
-        if result is None:
-            result = tensor.unsqueeze(0)
+
+def tile_worker(queue):
+    while True:
+        try:
+            item = queue.get()
+        except Empty:
+            logger.info('Loading Model')
+            break
         else:
-            result = torch.cat((result, tensor.unsqueeze(0)), dim=0)
-    result_up = diffusion.netG.super_resolution(result.to(diffusion.device), False)
-    for i, pos in enumerate(positions):
-        x = pos[0]
-        y = pos[1]
-        upscaled_tile = tensor_to_tile(result_up[i, ...])
-        final_image.paste(upscaled_tile, (x * tile_size * 2, y * tile_size * 2))
+            process_tile(*item)
+            queue.task_done()
 
 def diff2x(opt, input_image, logger):
     with torch.no_grad():
@@ -87,7 +80,6 @@ def diff2x(opt, input_image, logger):
             diffusion = Model.create_model(opt)
             diffusion.set_new_noise_schedule(
                 opt['model']['beta_schedule']['val'], schedule_phase='val')
-
             logger.info(f'Opening image "{input_image}"...')
             img = Image.open(input_image).convert('RGB')
             tile_size = 32
@@ -95,28 +87,27 @@ def diff2x(opt, input_image, logger):
             tcy = img.size[1] // tile_size
             logger.info('Begin Model Inference.')
             final_image = Image.new('RGB', (img.size[0] * 2, img.size[1] * 2))
-            tile_input = []
+            tile_batch = 10
+            logging.info(f"Setting up {tile_batch} workers...")
+            queue = Queue()
+            workers = []
+            for i in range(tile_batch):
+                worker = threading.Thread(target=tile_worker, args=(queue,))
+                worker.daemon = True
+                worker.start()
+                workers.append(worker)
+            logging.info(f"Making {tcy * tcx} tiles in {(tcy * tcx) // tile_batch} batches...")
             for y in range(tcy):
                 row = []
                 for x in range(tcx):
-                    tile_input.append((x, y))
-            tile_batch = 10
-            logging.info(f"Making {len(tile_input)} tiles in {len(tile_input) // tile_batch} batches...")
-            for tc in range(0, len(tile_input), tile_batch):
-                logging.info(f"Batch {tc // tile_batch}")
-                tiles_to_process = tile_input[tc:tc + min(tile_batch, len(tile_input))]
-                threads = []
-                for tile in tiles_to_process:
-                    thread = threading.Thread(target=process_tile, args=(tile[0], tile[1], tile_size, img, final_image, diffusion))
-                    threads.append(thread)
-                    thread.start()
-                for index, thread in enumerate(threads):
-                    thread.join()
-
-        except KeyboardInterrupt:
+                    item = (x, y, tile_size, img, final_image, diffusion)
+                    queue.put(item)
+            for worker in workers:
+                worker.join()
+        except KeyboardInterrupt as e:
             print('KeyboardInterrupt exception is caught')
             final_image.save("partial_image.png")
-            sys.exit(0)
+            raise e
         final_image.save("final_image.png")
         
 
