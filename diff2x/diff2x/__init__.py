@@ -1,0 +1,1 @@
+from .diff2x import upscale_image
