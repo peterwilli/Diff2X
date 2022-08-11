@@ -117,12 +117,10 @@ def process_tile(x, y, tile_size, img, final_image, diffusion):
     return upscaled_tile
 
 class TileWorker:
-    def __init__(self, tiles, queue: Queue, amount_to_make: int):
+    def __init__(self, queue: Queue):
         self._running = False
         self._thread = None
         self._queue = queue
-        self._tiles = tiles
-        self._amount_to_make = amount_to_make
 
     def terminate(self):
         self._running = False
@@ -137,14 +135,13 @@ class TileWorker:
         self._thread.join()
         
     def _run(self):
-        while self._running and len(self._tiles) < self._amount_to_make:
+        while self._running:
             try:
                 item = self._queue.get()
             except Empty:
-                continue
+                self.terminate()
             else:
-                tile = process_tile(*item)
-                self._tiles[f"{item[0]}x{item[1]}"] = tile
+                process_tile(*item)
                 self._queue.task_done()
 
 def diff2x(opt, input_image, logger):
@@ -166,10 +163,8 @@ def diff2x(opt, input_image, logger):
             logging.info(f"Setting up {tile_batch} workers...")
             queue = Queue()
             workers = []
-            tiles_made = {}
             for i in range(tile_batch):
-                worker = TileWorker(tiles_made, queue, tcy * tcx)
-                worker.start()
+                worker = TileWorker(queue)
                 workers.append(worker)
             logging.info(f"Making {tcy * tcx} tiles in {(tcy * tcx) // tile_batch} batches...")
             for y in range(tcy):
@@ -178,7 +173,8 @@ def diff2x(opt, input_image, logger):
                     item = (x, y, tile_size, img, final_image, diffusion)
                     queue.put(item)
             for worker in workers:
-                worker.join()
+                worker.start()
+            queue.join()
         except KeyboardInterrupt as e:
             if final_image is not None:
                 final_image.save("partial_image.png")

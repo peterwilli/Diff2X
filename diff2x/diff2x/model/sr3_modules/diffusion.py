@@ -202,12 +202,12 @@ class GaussianDiffusion(nn.Module):
     @torch.no_grad()
     def p_sample_loop(self, x, name = "Unamed Tile", continous=False):
         current_step = self.num_timesteps - 1
-        max_tries = 100
+        max_tries = 20
         current_tries = 0
         pbar = tqdm(range(100), desc=f"[{name.ljust(12)}] Noise Treshold")
         img = torch.randn(x.shape, device=x.device)
         start_sigma = self.estimate_noise(img).item()
-        noise_treshold = self.estimate_noise(x).item() * 1.5
+        noise_treshold = self.estimate_noise(x).item()
         sigma = start_sigma
         start = False
         direction = None
@@ -223,7 +223,7 @@ class GaussianDiffusion(nn.Module):
                     direction = 'up'
             else:
                 current_tries += 1
-                if sigma_change_pct < (0.01 * (current_step + 1)):
+                if sigma_change_pct < (0.05 * (current_step + 1)):
                     if direction == 'up':
                         current_step += 1
                         if current_step >= self.num_timesteps - 1:
