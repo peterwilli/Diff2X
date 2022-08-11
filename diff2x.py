@@ -59,20 +59,41 @@ def process_tile(x, y, tile_size, img, final_image, diffusion):
     tensor_up = diffusion.netG.super_resolution(tensor.unsqueeze(0), name = f"Tile {x + 1}x{y + 1}", continous = False)
     upscaled_tile = tensor_to_tile(tensor_up)
     final_image.paste(upscaled_tile, (crop_rect[0] * 2, crop_rect[1] * 2))
+    return upscaled_tile
 
-def tile_worker(queue):
-    while True:
-        try:
-            item = queue.get()
-        except Empty:
-            logger.info('Loading Model')
-            break
-        else:
-            process_tile(*item)
-            queue.task_done()
+class TileWorker:
+    def __init__(self, tiles, queue: Queue, amount_to_make: int):
+        self._running = False
+        self._thread = None
+        self._queue = queue
+        self._tiles = tiles
+        self._amount_to_make = amount_to_make
+
+    def terminate(self):
+        self._running = False
+        self._thread = None
+
+    def start(self):
+        self._running = True
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def join(self):
+        self._thread.join()
+        
+    def _run(self):
+        while self._running or len(self._tiles) < self._amount_to_make:
+            try:
+                item = self._queue.get()
+            except Empty:
+                continue
+            else:
+                tile = process_tile(*item)
+                self._queue.task_done()
 
 def diff2x(opt, input_image, logger):
     with torch.no_grad():
+        final_image = None
         try:
             result_path = '{}'.format(opt['path']['results'])
             os.makedirs(result_path, exist_ok=True)
@@ -82,18 +103,18 @@ def diff2x(opt, input_image, logger):
                 opt['model']['beta_schedule']['val'], schedule_phase='val')
             logger.info(f'Opening image "{input_image}"...')
             img = Image.open(input_image).convert('RGB')
+            final_image = Image.new('RGB', (img.size[0] * 2, img.size[1] * 2))
             tile_size = 32
             tcx = img.size[0] // tile_size
             tcy = img.size[1] // tile_size
             logger.info('Begin Model Inference.')
-            final_image = Image.new('RGB', (img.size[0] * 2, img.size[1] * 2))
-            tile_batch = 10
+            tile_batch = 1
             logging.info(f"Setting up {tile_batch} workers...")
             queue = Queue()
             workers = []
+            tiles_made = {}
             for i in range(tile_batch):
-                worker = threading.Thread(target=tile_worker, args=(queue,))
-                worker.daemon = True
+                worker = TileWorker(tiles_made, queue, tcy * tcx)
                 worker.start()
                 workers.append(worker)
             logging.info(f"Making {tcy * tcx} tiles in {(tcy * tcx) // tile_batch} batches...")
@@ -105,8 +126,8 @@ def diff2x(opt, input_image, logger):
             for worker in workers:
                 worker.join()
         except KeyboardInterrupt as e:
-            print('KeyboardInterrupt exception is caught')
-            final_image.save("partial_image.png")
+            if final_image is not None:
+                final_image.save("partial_image.png")
             raise e
         final_image.save("final_image.png")
         

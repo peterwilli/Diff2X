@@ -6,9 +6,8 @@ from inspect import isfunction
 from functools import partial
 import numpy as np
 import torchvision
+import random
 from tqdm import tqdm
-import scipy
-from scipy.signal import convolve2d
 
 def _warmup_beta(linear_start, linear_end, n_timestep, warmup_frac):
     betas = linear_end * np.ones(n_timestep, dtype=np.float64)
@@ -172,9 +171,7 @@ class GaussianDiffusion(nn.Module):
     def p_sample(self, x, t, clip_denoised=True, condition_x=None):
         model_mean, model_log_variance = self.p_mean_variance(
             x=x, t=t, clip_denoised=clip_denoised, condition_x=condition_x)
-        # noise = torch.randn(x.shape[1:]) if t > 0 else torch.zeros(x.shape[1:])
         noise = torch.randn(x.shape, device=x.device) if t > 0 else torch.zeros(x.shape, device=x.device)
-        # noise = self.batch_noise(noise, x.shape[0]).to(x.device)
         return model_mean + noise * (0.5 * model_log_variance).exp()
 
     @torch.no_grad()
@@ -205,31 +202,34 @@ class GaussianDiffusion(nn.Module):
     @torch.no_grad()
     def p_sample_loop(self, x, name = "Unamed Tile", continous=False):
         current_step = self.num_timesteps - 1
-        last_sigma = None
         noise_treshold = 0.0035
         noise_tries = 1000
         pbar = tqdm(range(100), desc=f"[{name.ljust(12)}] Noise Treshold")
         img = torch.randn(x.shape, device=x.device)
         start_sigma = self.estimate_noise(img).item()
         sigma = start_sigma
-        for _ in range(noise_tries):
+        skip_count = 0
+        for try_idx in range(noise_tries):
             img_new = self.p_sample(img, current_step, condition_x=x)
             sigma_new = self.estimate_noise(img_new).item()
-            if sigma_new < sigma:
-                sigma = sigma_new
-                img = img_new
+            sigma_change_pct = (sigma - sigma_new) / sigma
+            if sigma_change_pct < 0.05:
+                current_step = max(0, current_step - 1)
+                if current_step == 0:
+                    current_step = random.randint(0, self.num_timesteps - 1)
+                continue
+            sigma = sigma_new
+            img = img_new
             change_pct = 1 - (abs(sigma - noise_treshold) / start_sigma)
             pbar.n = math.floor(change_pct * 100)
             pbar.refresh()
-            if last_sigma is not None:
-                sigma_change_pct = (last_sigma - sigma) / last_sigma
-                if sigma_change_pct < 0.01:
-                    current_step = max(0, current_step - 1)
             last_sigma = sigma
             passed_noise_treshold = sigma < noise_treshold
             if passed_noise_treshold:
+                pbar.n = 100
+                pbar.refresh()
                 return img
-        return ret_img
+        return img
 
     @torch.no_grad()
     def sample(self, batch_size=1, continous=False):
