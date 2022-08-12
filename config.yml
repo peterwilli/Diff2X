@@ -1,0 +1,4 @@
+jtype: Diff2Executor
+metas:
+  py_modules:
+    - diff2x/__init__.py

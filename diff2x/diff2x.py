@@ -11,9 +11,28 @@ import os
 import traceback
 import sys
 import threading
+from threading import Lock
 from queue import Empty, Queue
 
-def upscale_image(image, params = {}):
+class ThreadSafeCounter():
+    # constructor
+    def __init__(self):
+        # initialize counter
+        self._counter = 0
+        # initialize lock
+        self._lock = Lock()
+ 
+    # increment the counter
+    def increment(self, n):
+        with self._lock:
+            self._counter += n
+ 
+    # get the counter value
+    def value(self):
+        with self._lock:
+            return self._counter
+
+def upscale_image(image, params = {}, on_image_update = None):
     opt = {
         "name": "diffusion2x",
         "phase": "train",
@@ -94,7 +113,7 @@ def upscale_image(image, params = {}):
     opt.update(params)
     logger = logging.getLogger('base')
     logger.info(Logger.dict2str(opt))   
-    diff2x(opt, image, logger)
+    return diff2x(opt, image, logger, on_image_update)
 
 def tile_to_tensor(tile: Image):
     min_max = (-1, 1) 
@@ -117,10 +136,11 @@ def process_tile(x, y, tile_size, img, final_image, diffusion):
     return upscaled_tile
 
 class TileWorker:
-    def __init__(self, queue: Queue):
+    def __init__(self, queue: Queue, on_image_update):
         self._running = False
         self._thread = None
         self._queue = queue
+        self._on_image_update = on_image_update
 
     def terminate(self):
         self._running = False
@@ -142,46 +162,55 @@ class TileWorker:
                 self.terminate()
             else:
                 process_tile(*item)
+                self._on_image_update(item[4])
                 self._queue.task_done()
 
-def diff2x(opt, input_image, logger):
-    with torch.no_grad():
-        final_image = None
-        try:
-            logger.info('Loading Model')
-            diffusion = Model.create_model(opt)
-            diffusion.set_new_noise_schedule(
-                opt['model']['beta_schedule']['val'], schedule_phase='val')
-            logger.info(f'Opening image "{input_image}"...')
-            img = Image.open(input_image).convert('RGB')
-            final_image = Image.new('RGB', (img.size[0] * 2, img.size[1] * 2))
-            tile_size = 32
-            tcx = img.size[0] // tile_size
-            tcy = img.size[1] // tile_size
-            logger.info('Begin Model Inference.')
-            tile_batch = 10
-            logging.info(f"Setting up {tile_batch} workers...")
-            queue = Queue()
-            workers = []
-            for i in range(tile_batch):
-                worker = TileWorker(queue)
-                workers.append(worker)
-            logging.info(f"Making {tcy * tcx} tiles in {(tcy * tcx) // tile_batch} batches...")
-            for y in range(tcy):
-                row = []
-                for x in range(tcx):
-                    item = (x, y, tile_size, img, final_image, diffusion)
-                    queue.put(item)
-            for worker in workers:
-                worker.start()
-            queue.join()
-        except KeyboardInterrupt as e:
-            if final_image is not None:
-                final_image.save("partial_image.png")
-            for worker in workers:
-                worker.terminate()
-            raise e
-        final_image.save("final_image.png")
+class Diff2XResult:
+    def __init__(self, queue, final_image, tiles_done_counter: ThreadSafeCounter, total_tiles_to_make: int):
+        self._queue = queue
+        self._total_tiles_to_make = total_tiles_to_make
+        self._tiles_done_counter = tiles_done_counter
+        self.final_image = final_image
 
+    def progress_pct(self):
+        return self._tiles_done_counter.value() / self._total_tiles_to_make
+
+    def wait(self):
+        self._queue.join()
+
+def diff2x(opt, input_image, logger, on_image_update):
+    with torch.no_grad():
+        logger.info('Loading Model')
+        diffusion = Model.create_model(opt)
+        diffusion.set_new_noise_schedule(
+            opt['model']['beta_schedule']['val'], schedule_phase='val')
+        logger.info(f'Opening image "{input_image}"...')
+        img = Image.open(input_image).convert('RGB')
+        final_image = Image.new('RGB', (img.size[0] * 2, img.size[1] * 2))
+        tile_size = 32
+        tcx = img.size[0] // tile_size
+        tcy = img.size[1] // tile_size
+        logger.info('Begin Model Inference.')
+        tile_batch = 10
+        logging.info(f"Setting up {tile_batch} workers...")
+        queue = Queue()
+        workers = []
+        tiles_done_counter = ThreadSafeCounter()
+        for i in range(tile_batch):
+            def _on_image_update(image):
+                tiles_done_counter.increment(1)
+                if on_image_update is not None:
+                    on_image_update(image)
+            worker = TileWorker(queue, _on_image_update)
+            workers.append(worker)
+        logging.info(f"Making {tcy * tcx} tiles in {(tcy * tcx) // tile_batch} batches...")
+        for y in range(tcy):
+            row = []
+            for x in range(tcx):
+                item = (x, y, tile_size, img, final_image, diffusion)
+                queue.put(item)
+        for worker in workers:
+            worker.start()
+        return Diff2XResult(queue, final_image, tiles_done_counter, tcx * tcy)
 if __name__ == "__main__":
     main()

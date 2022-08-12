@@ -18,7 +18,9 @@ setup(
         'lmdb',
         'pillow',
         'tensorboardx',
-        'wandb'
+        'wandb',
+        'fasteners',
+        'throttle'
     ],
     classifiers=[
         'Development Status :: 2 - Testing',
