@@ -10,6 +10,7 @@ import torch
 import os
 import traceback
 import sys
+import numpy as np
 import threading
 from threading import Lock
 from queue import Empty, Queue
@@ -85,7 +86,7 @@ def upscale_image(image, params = {}, on_image_update = None):
                 },
                 "val": {
                     "schedule": "linear",
-                    "n_timestep": 10,
+                    "n_timestep": 100,
                     "linear_start": 1e-06,
                     "linear_end": 0.01,
                 },
@@ -126,13 +127,58 @@ def tensor_to_tile(tensor) -> Image:
     tensor = (tensor - min_max[0]) / (min_max[1] - min_max[0])
     return TF.to_pil_image(tensor)
 
-def process_tile(x, y, tile_size, img, final_image, diffusion):
+def make_transparency_mask(size, overlap_pixels, remove_borders = []):
+    size_x = size[0] - overlap_pixels * 2
+    size_y = size[1] - overlap_pixels * 2
+    for letter in ['l', 'r']:
+        if letter in remove_borders:
+            size_x += overlap_pixels
+    for letter in ['t', 'b']:
+        if letter in remove_borders:
+            size_y += overlap_pixels
+    mask = np.ones((size_y, size_x), dtype=np.uint8) * 255
+    mask = np.pad(mask, mode = 'linear_ramp', pad_width=overlap_pixels, end_values = 0)
+
+    if 'l' in remove_borders:
+        mask = mask[:, overlap_pixels:mask.shape[1]]
+    if 'r' in remove_borders:
+        mask = mask[:, 0:mask.shape[1] - overlap_pixels]
+    for letter in ['t', 'b']:
+        if letter in remove_borders:
+            mask = mask[overlap_pixels:mask.shape[0], :]
+    return mask
+
+def add_overlap_rect(rect: [int], overlap: int, image_size: [int]):
+    rect = list(rect)
+    if rect[0] > 0:
+        rect[0] -= overlap
+    if rect[1] > 0:
+        rect[1] -= overlap
+    if rect[2] < image_size[0]:
+        rect[2] += overlap
+    if rect[3] < image_size[1]:
+        rect[3] += overlap
+    return rect
+
+def process_tile(x, y, tile_size, tile_border, img, final_image, diffusion):
     crop_rect = (x * tile_size, y * tile_size, min(img.size[0], (x + 1) * tile_size), min(img.size[1], (y + 1) * tile_size))
-    tile = img.crop(crop_rect).resize((tile_size * 2, tile_size * 2), Image.BICUBIC)
+    crop_rect_with_overlap = add_overlap_rect(crop_rect, tile_border, img.size)
+    tile = img.crop(crop_rect_with_overlap)
+    tile = tile.resize((tile.size[0] * 2, tile.size[1] * 2), Image.BICUBIC)
     tensor = tile_to_tensor(tile).to(diffusion.device)
     tensor_up = diffusion.netG.super_resolution(tensor.unsqueeze(0), name = f"Tile {x + 1}x{y + 1}", continous = False)
     upscaled_tile = tensor_to_tile(tensor_up)
-    final_image.paste(upscaled_tile, (crop_rect[0] * 2, crop_rect[1] * 2))
+    remove_borders = []
+    if x == 0:
+        remove_borders.append("l")
+    elif crop_rect[2] == img.size[0]:
+        remove_borders.append("r")
+    if y == 0:
+        remove_borders.append("t")
+    elif crop_rect[3] == img.size[1]:
+        remove_borders.append("b")
+    transparency_mask = Image.fromarray(make_transparency_mask((tile.size[0], tile.size[1]), tile_border, remove_borders=remove_borders), mode="L")    
+    final_image.paste(upscaled_tile, (crop_rect_with_overlap[0] * 2, crop_rect_with_overlap[1] * 2), transparency_mask)
     return upscaled_tile
 
 class TileWorker:
@@ -162,7 +208,7 @@ class TileWorker:
                 self.terminate()
             else:
                 process_tile(*item)
-                self._on_image_update(item[4])
+                self._on_image_update(item[5])
                 self._queue.task_done()
 
 class Diff2XResult:
@@ -187,11 +233,12 @@ def diff2x(opt, input_image, logger, on_image_update):
         logger.info(f'Opening image "{input_image}"...')
         img = Image.open(input_image).convert('RGB')
         final_image = Image.new('RGB', (img.size[0] * 2, img.size[1] * 2))
+        tile_border = 8
         tile_size = 32
         tcx = img.size[0] // tile_size
         tcy = img.size[1] // tile_size
         logger.info('Begin Model Inference.')
-        tile_batch = 10
+        tile_batch = 5
         logging.info(f"Setting up {tile_batch} workers...")
         queue = Queue()
         workers = []
@@ -207,7 +254,7 @@ def diff2x(opt, input_image, logger, on_image_update):
         for y in range(tcy):
             row = []
             for x in range(tcx):
-                item = (x, y, tile_size, img, final_image, diffusion)
+                item = (x, y, tile_size, tile_border, img, final_image, diffusion)
                 queue.put(item)
         for worker in workers:
             worker.start()

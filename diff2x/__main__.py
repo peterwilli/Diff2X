@@ -18,6 +18,19 @@ def main():
             help='The YAML config file to use, default is stdin.',
             default=sys.stdin,
         )
+    upscale_parser = sps.add_parser('upscale', help='Upscale image with Diff2X')
+    upscale_parser.add_argument(
+        'image_file',
+        type=str,
+        help='Image file to upscale, default is stdin.',
+        default=sys.stdin,
+    )
+    upscale_parser.add_argument(
+        'output_file',
+        type=str,
+        help='Output file, default is stdout',
+        default=sys.stdout,
+    )
     args = parser.parse_args()
     run_cli(args)
 
@@ -40,11 +53,24 @@ def _serve(cfg):
     from jina import Flow
     return Flow.load_config(cfg)
 
+def _upscale(input_file, output_file):
+    from .diff2x import upscale_image
+    def on_image_update(image):
+        img_out = open(output_file, 'wb')
+        image.save(img_out)
+        img_out.flush()
+        img_out.close()
+    result = upscale_image(input_file, on_image_update = on_image_update)
+    result.wait()
+    result.final_image.save(output_file)
+
 def run_cli(args):
     if args.action == "serve":
         serve(args.config_file)
     elif args.action == "serve_test":
         serve_test(args.config_file)
+    elif args.action == "upscale":
+        _upscale(args.image_file, args.output_file)
 
 if __name__ == '__main__':
     main()
