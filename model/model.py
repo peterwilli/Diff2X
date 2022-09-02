@@ -68,7 +68,7 @@ class DDPM(BaseModel):
                 num_training_steps = self.opt['train']['n_iter'],
                 noise_amount = 0.01,
                 num_cycles = 100,
-                merge_cycles = 4,
+                merge_cycles = 50,
                 last_epoch = -1
             )
             self.log_dict = OrderedDict()
@@ -205,6 +205,6 @@ class DDPM(BaseModel):
                     num_training_steps = self.opt['train']['n_iter'],
                     noise_amount = 0.01,
                     num_cycles = 100,
-                    merge_cycles = 4,
+                    merge_cycles = 50,
                     last_epoch = self.begin_step - 1
                 )
