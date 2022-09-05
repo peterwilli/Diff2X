@@ -204,25 +204,28 @@ class GaussianDiffusion(nn.Module):
         current_step = self.num_timesteps - 1
         max_tries = 20
         current_tries = 0
-        pbar = tqdm(range(100), desc=f"[{name.ljust(12)}] Noise Threshold")
+        pbar = tqdm(range(100), desc=f"[{name.ljust(12)}] Noise Treshold")
         img = torch.randn(x.shape, device=x.device)
         start_sigma = self.estimate_noise(img).item()
         noise_treshold = self.estimate_noise(x).item()
         sigma = start_sigma
         while current_tries < max_tries:
-            img_new = self.p_sample(img, current_step, condition_x=x)
             pbar.set_description(f"[{name.ljust(12)} step: {current_step:04d}] Noise Threshold")
+            img_new = self.p_sample(img, current_step, condition_x=x)
             sigma_new = self.estimate_noise(img_new).item()
+            # print(f"current sigma: {sigma_new} Last sigma: {sigma} current_step: {current_step} Treshold: {noise_treshold} {try_idx}")
+            sigma_change_pct = (sigma - sigma_new) / sigma
+            current_tries += 1
+            if sigma_change_pct < 0.05:
+                current_step -= 1
+                if current_step <= 0:
+                    current_step = 0
             if sigma_new > sigma:
-                current_tries += 1
                 continue
             sigma = sigma_new
             img = img_new
             current_tries = max(current_tries - 1, 0)
             change_pct = 1 - (abs(sigma - noise_treshold) / start_sigma)
-            current_step = round((1 - change_pct) * self.num_timesteps)
-            current_step = max(0, current_step)
-            current_step = min(self.num_timesteps, current_step)
             pbar.n = math.floor(change_pct * 100)
             pbar.refresh()
             last_sigma = sigma
@@ -231,6 +234,7 @@ class GaussianDiffusion(nn.Module):
                 pbar.n = 100
                 pbar.refresh()
                 return img
+        pbar.set_description(f"[{name.ljust(12)} step: {current_step:04d}] [given up]")
         return img
 
     @torch.no_grad()

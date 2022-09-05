@@ -39,7 +39,7 @@ def upscale_image(image, params = {}, on_image_update = None):
         "phase": "train",
         "gpu_ids": [0],
         "path": {
-            "resume_state": "./I130000_E13",
+            "resume_state": "./I50000_E39",
         },
         "datasets": {
             "train": {
@@ -80,13 +80,13 @@ def upscale_image(image, params = {}, on_image_update = None):
             "beta_schedule": {
                 "train": {
                     "schedule": "linear",
-                    "n_timestep": 1000,
+                    "n_timestep": 2000,
                     "linear_start": 1e-06,
                     "linear_end": 0.01,
                 },
                 "val": {
                     "schedule": "linear",
-                    "n_timestep": 100,
+                    "n_timestep": 10,
                     "linear_start": 1e-06,
                     "linear_end": 0.01,
                 },
@@ -238,7 +238,7 @@ def diff2x(opt, input_image, logger, on_image_update):
         tcx = img.size[0] // tile_size
         tcy = img.size[1] // tile_size
         logger.info('Begin Model Inference.')
-        tile_batch = 5
+        tile_batch = 10
         logging.info(f"Setting up {tile_batch} workers...")
         queue = Queue()
         workers = []
