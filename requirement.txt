@@ -9,3 +9,4 @@ pillow
 tensorboardx
 wandb
 gitpython
+imgaug>=0.4

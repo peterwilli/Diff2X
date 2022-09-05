@@ -3,6 +3,7 @@ import torch
 import torchvision
 import random
 import numpy as np
+import imgaug.augmenters as iaa
 
 IMG_EXTENSIONS = ['.jpg', '.JPG', '.jpeg', '.JPEG',
                   '.png', '.PNG', '.ppm', '.PPM', '.bmp', '.BMP']
@@ -72,12 +73,29 @@ def transform2tensor(img, min_max=(0, 1)):
 
 # implementation by torchvision, detail in https://github.com/Janspiry/Image-Super-Resolution-via-Iterative-Refinement/issues/14
 totensor = torchvision.transforms.ToTensor()
-hflip = torchvision.transforms.RandomHorizontalFlip()
+aug_seq_source = iaa.Sequential([
+    iaa.Sometimes(
+        0.5,
+        iaa.AdditiveGaussianNoise(scale=(0, 0.2*255))
+    ),
+    iaa.Sometimes(
+        0.2,
+        iaa.Dropout(p=(0.1, 0.3))
+    ),
+    iaa.Sometimes(
+        0.5,
+        iaa.JpegCompression(compression=(10, 30))
+    ),
+])
+aug_seq_all = iaa.Sequential([
+    iaa.Fliplr(0.5),
+    iaa.Flipud(0.5),
+])
 def transform_augment(img_list, split='val', min_max=(0, 1)):    
     imgs = [totensor(img) for img in img_list]
     if split == 'train':
-        imgs = torch.stack(imgs, 0)
-        imgs = hflip(imgs)
-        imgs = torch.unbind(imgs, dim=0)
+        aug_seq_all_det = aug_seq_all.to_deterministic()
+        imgs = [aug_seq_all_det(img) for img in imgs]
+        imgs[0] = aug_seq_source(imgs[0])
     ret_img = [img * (min_max[1] - min_max[0]) + min_max[0] for img in imgs]
     return ret_img
