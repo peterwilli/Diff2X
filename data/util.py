@@ -97,7 +97,7 @@ aug_seq_all = iaa.Sequential([
 def transform_augment(img_list, split='val', min_max=(0, 1)):    
     if split == 'train':
         aug_seq_all_det = aug_seq_all.to_deterministic()
-        img_list = aug_seq_all_det(images = [np.array(img) for img in img_list])
+        img_list = [aug_seq_all_det(image = np.array(img)) for img in img_list]
         img_list[0] = aug_seq_source(images = [np.array(img_list[0])])[0]
         img_list = [Image.fromarray(img) for img in img_list]
     imgs = [totensor(img) for img in img_list]
