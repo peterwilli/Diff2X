@@ -98,8 +98,11 @@ def transform_augment(img_list, split='val', min_max=(0, 1)):
     if split == 'train':
         aug_seq_all_det = aug_seq_all.to_deterministic()
         img_list = [aug_seq_all_det(image = np.array(img)) for img in img_list]
-        img_list[0] = aug_seq_source(images = [np.array(img_list[0])])[0]
-        img_list = [Image.fromarray(img) for img in img_list]
+        img_hr = Image.fromarray(img_list[1])
+        new_img_sr = img_hr.resize((img_hr.size[0] // 2, img_hr.size[1] // 2), Image.BICUBIC)
+        new_img_sr = aug_seq_source(image = np.array(new_img_sr))[0]
+        new_img_sr = Image.fromarray(new_img_sr).resize((img_hr.size[0], img_hr.size[1]), Image.BICUBIC)
+        img_list = [new_img_sr, img_hr]
     imgs = [totensor(img) for img in img_list]
     ret_img = [img * (min_max[1] - min_max[0]) + min_max[0] for img in imgs]
     return ret_img
