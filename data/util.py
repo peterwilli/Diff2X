@@ -90,6 +90,7 @@ aug_seq_source = iaa.Sequential([
 aug_seq_all = iaa.Sequential([
     iaa.Fliplr(0.5),
     iaa.Flipud(0.5),
+    iaa.AddToHueAndSaturation((-50, 50), per_channel=True)
 ])
 def transform_augment(img_list, split='val', min_max=(0, 1)):    
     imgs = [totensor(img) for img in img_list]
