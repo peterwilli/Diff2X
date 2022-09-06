@@ -4,6 +4,7 @@ import torchvision
 import random
 import numpy as np
 import imgaug.augmenters as iaa
+from PIL import Image
 
 IMG_EXTENSIONS = ['.jpg', '.JPG', '.jpeg', '.JPEG',
                   '.png', '.PNG', '.ppm', '.PPM', '.bmp', '.BMP']
@@ -92,11 +93,13 @@ aug_seq_all = iaa.Sequential([
     iaa.Flipud(0.5),
     iaa.AddToHueAndSaturation((-50, 50), per_channel=True)
 ])
+
 def transform_augment(img_list, split='val', min_max=(0, 1)):    
-    imgs = [totensor(img) for img in img_list]
     if split == 'train':
         aug_seq_all_det = aug_seq_all.to_deterministic()
-        imgs = [aug_seq_all_det(img) for img in imgs]
-        imgs[0] = aug_seq_source(imgs[0])
+        img_list = aug_seq_all_det(images = [np.array(img) for img in img_list])
+        img_list[0] = aug_seq_source(images = [np.array(img_list[0])])[0]
+        img_list = [Image.fromarray(img) for img in img_list]
+    imgs = [totensor(img) for img in img_list]
     ret_img = [img * (min_max[1] - min_max[0]) + min_max[0] for img in imgs]
     return ret_img
