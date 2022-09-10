@@ -77,11 +77,11 @@ totensor = torchvision.transforms.ToTensor()
 aug_seq_source = iaa.Sequential([
     iaa.Sometimes(
         0.5,
-        iaa.AdditiveGaussianNoise(scale=(0, 0.2*255))
+        iaa.AdditiveGaussianNoise(scale=(0, 0.05*255))
     ),
     iaa.Sometimes(
         0.2,
-        iaa.Dropout(p=(0.1, 0.3))
+        iaa.Dropout(p=(0.01, 0.1))
     ),
     iaa.Sometimes(
         0.5,
@@ -91,7 +91,8 @@ aug_seq_source = iaa.Sequential([
 aug_seq_all = iaa.Sequential([
     iaa.Fliplr(0.5),
     iaa.Flipud(0.5),
-    iaa.AddToHueAndSaturation((-50, 50), per_channel=True)
+    iaa.AddToHueAndSaturation((-50, 50), per_channel=True),
+    iaa.MultiplyAndAddToBrightness(mul=(0.5, 1.5), add=(-30, 30))
 ])
 
 def transform_augment(img_list, split='val', min_max=(0, 1)):    
