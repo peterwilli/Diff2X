@@ -77,11 +77,11 @@ totensor = torchvision.transforms.ToTensor()
 aug_seq_source = iaa.Sequential([
     iaa.Sometimes(
         0.5,
-        iaa.AdditiveGaussianNoise(scale=(0, 0.05*255))
+        iaa.AdditiveGaussianNoise(scale=(0.005*255, 0.01*255))
     ),
     iaa.Sometimes(
-        0.2,
-        iaa.Dropout(p=(0.01, 0.1))
+        0.5,
+        iaa.Dropout(p=(0.005, 0.01))
     ),
     iaa.Sometimes(
         0.5,
