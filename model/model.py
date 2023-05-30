@@ -67,8 +67,8 @@ class DDPM(BaseModel):
                 num_warmup_steps = 1000,
                 num_training_steps = self.opt['train']['n_iter'],
                 noise_amount = 0.01,
-                num_cycles = 100,
-                merge_cycles = 50,
+                num_cycles = 1,
+                merge_cycles = 1,
                 last_epoch = -1
             )
             self.log_dict = OrderedDict()
@@ -197,14 +197,14 @@ class DDPM(BaseModel):
                 # optimizer
                 opt = torch.load(opt_path)
                 self.optG.load_state_dict(opt['optimizer'])
-                self.begin_step = opt['iter']
-                self.begin_epoch = opt['epoch']
+                # self.begin_step = opt['iter']
+                # self.begin_epoch = opt['epoch']
                 self.schedG = get_cycles_buildoff(
                     optimizer = self.optG,
                     num_warmup_steps = 1000,
                     num_training_steps = self.opt['train']['n_iter'],
                     noise_amount = 0.01,
-                    num_cycles = 100,
-                    merge_cycles = 25,
+                    num_cycles = 1,
+                    merge_cycles = 1,
                     last_epoch = self.begin_step - 1
                 )
